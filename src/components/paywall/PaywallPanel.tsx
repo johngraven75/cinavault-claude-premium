@@ -1,7 +1,7 @@
 // CinaVault Plus upgrade panel: plan, price, Plus features, checkout and
 // offline license activation. Used inline (AccountTab) and in the global
 // paywall modal (PaywallHost) whenever a command refuses with "PAYWALL:".
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import type { JSX } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import {
@@ -56,6 +56,7 @@ export default function PaywallPanel({
   const activate = useEntitlementsStore((state) => state.activate);
   const beginTrial = useEntitlementsStore((state) => state.startTrial);
 
+  const licenseInputId = useId();
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState<"activate" | "checkout" | "trial" | null>(null);
   const [notice, setNotice] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
@@ -260,12 +261,12 @@ export default function PaywallPanel({
         )}
 
         <div className="mt-4 border-t border-white/10 pt-4">
-          <label className="section-label flex items-center gap-1.5" htmlFor="cv-license-key">
+          <label className="section-label flex items-center gap-1.5" htmlFor={licenseInputId}>
             <KeyRound size={12} aria-hidden="true" /> License key
           </label>
           <div className="mt-1 flex flex-col gap-2 sm:flex-row">
             <input
-              id="cv-license-key"
+              id={licenseInputId}
               type="password"
               autoComplete="off"
               spellCheck={false}

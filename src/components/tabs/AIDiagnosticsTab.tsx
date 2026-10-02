@@ -38,7 +38,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { IS_STORE_SAFE } from "../../config/edition";
 import FeatureGate from "../paywall/FeatureGate";
-import { parsePaywallError, paywallAwareErrorMessage } from "../../services/entitlements";
+import { paywallAwareErrorMessage, paywallShownByGate, useFeatureUnlocked } from "../../services/entitlements";
 
 const DEFAULT_HF_MODEL = "katanemo/Arch-Router-1.5B:hf-inference";
 const HF_FREE_MODELS = [
@@ -315,14 +315,16 @@ export default function AIDiagnosticsTab() {
     if (showConfig) void loadAiConfig();
   }, [showConfig, loadAiConfig]);
 
+  const adultMetadataUnlocked = useFeatureUnlocked("adult_metadata");
+
   const loadAdultProviders = useCallback(async () => {
     try {
       const result = await invoke<{ providers: AdultProviderSetting[] }>("get_adult_provider_settings");
       setAdultProviders(result.providers);
     } catch (error) {
-      // A Plus refusal on load is represented by the FeatureGate, not a raw error.
-      if (parsePaywallError(error)) return;
-      setAdultProviderNotice(`Could not load adult provider status: ${error}`);
+      // A Plus refusal the FeatureGate already shows needs no extra notice.
+      if (paywallShownByGate(error)) return;
+      setAdultProviderNotice(`Could not load adult provider status: ${paywallAwareErrorMessage(error)}`);
     }
   }, []);
 
@@ -1119,7 +1121,7 @@ export default function AIDiagnosticsTab() {
                 <h4 className="text-xs font-bold">Adult metadata providers</h4>
                 <p className="mt-1 text-[10px] text-cv-subtext">Only adult providers are used by Adult Metadata Gather. Saved credentials are never shown here.</p>
               </div>
-              <button type="button" onClick={() => void saveAdultProviders()} disabled={adultProviderBusy !== null} className="cv-btn cv-btn-primary text-xs disabled:opacity-50"><Key size={12} /> {adultProviderBusy === "save" ? "Saving…" : "Save adult providers"}</button>
+              <button type="button" onClick={() => void saveAdultProviders()} disabled={adultProviderBusy !== null || !adultMetadataUnlocked} title={adultMetadataUnlocked ? undefined : "Adult metadata providers are part of CinaVault Plus"} className="cv-btn cv-btn-primary text-xs disabled:opacity-50"><Key size={12} /> {adultProviderBusy === "save" ? "Saving…" : "Save adult providers"}</button>
             </div>
             <FeatureGate feature="adult_metadata" variant="compact">
             <div className="mt-3 grid gap-3">

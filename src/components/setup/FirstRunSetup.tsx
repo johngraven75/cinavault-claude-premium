@@ -29,7 +29,9 @@ import {
   FIRST_RUN_STEPS,
   buildKeylessProviders,
   buildSetupProviders,
+  adultProvidersSkippedNote,
   configuredProviderIds,
+  createSerialSaver,
   initialKeyState,
   interpretTestResult,
   isLastStep,
@@ -153,11 +155,20 @@ export default function FirstRunSetup(): JSX.Element {
     setKeys((current) => ({ ...current, [id]: { ...current[id], ...patch } }));
   }, []);
 
+  // One queue for the wizard's lifetime: saves per provider run in order.
+  const [serialSave] = useState(() =>
+    createSerialSaver(async (providerId, value) => {
+      await invoke("set_api_key", { provider: providerId, apiKey: value.trim() });
+      return true;
+    }),
+  );
+
+  /** Saves `value`; returns true only if it saved and is still the newest value for the provider. */
   const saveKey = useCallback(
     async (provider: SetupProvider, value: string): Promise<boolean> => {
       try {
-        await invoke("set_api_key", { provider: provider.id, apiKey: value.trim() });
-        return true;
+        const { saved, latest } = await serialSave(provider.id, value);
+        return saved && latest;
       } catch (error) {
         patchKey(provider.id, {
           status: "error",
@@ -166,7 +177,7 @@ export default function FirstRunSetup(): JSX.Element {
         return false;
       }
     },
-    [patchKey],
+    [patchKey, serialSave],
   );
 
   const onKeyChange = (provider: SetupProvider, value: string) => {
@@ -240,7 +251,7 @@ export default function FirstRunSetup(): JSX.Element {
       .then((result) => {
         const enriched = result?.metadata_items_enriched ?? result?.metadata_updated ?? 0;
         addStatusMessage(
-          `Library enrichment complete: ${enriched} items enriched, ${result?.posters_downloaded ?? 0} posters downloaded`,
+          `Library enrichment complete: ${enriched} items enriched, ${result?.posters_downloaded ?? 0} posters downloaded.${adultProvidersSkippedNote(result)}`,
         );
         window.dispatchEvent(
           new CustomEvent("cinavault:library-refresh", { detail: { reason: "first-run-enrichment" } }),

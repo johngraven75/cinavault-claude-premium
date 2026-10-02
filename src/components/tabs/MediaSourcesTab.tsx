@@ -7,6 +7,7 @@ import { ExternalLink, File, FolderOpen, HardDrive, Link, Plus, RefreshCw, Scan,
 import TabBanner from "../experience/TabBanner";
 import { IS_STORE_SAFE } from "../../config/edition";
 import { paywallAwareErrorMessage } from "../../services/entitlements";
+import { adultProvidersSkippedNote } from "../../services/firstRunSetup";
 
 type ScanResult = { status?: string; total_found?: number | string; total_added?: number | string; total_updated?: number | string; sources_scanned?: number | string; sources_failed?: number | string; errors?: string[] };
 type SourceLike = { id?: number; path: string; source_type: string; name: string; enabled: boolean; last_scanned?: string; item_count: number };
@@ -73,7 +74,7 @@ export default function MediaSourcesTab() {
     if (!shouldPullMetadataAfterScan(result)) { addStatusMessage("Metadata pull skipped: automatic metadata after scan is disabled or no media was found"); return; }
     addStatusMessage("AI is identifying media and retrieving posters...");
     const enrichment = await invoke<LibraryEnrichmentResult>("run_library_enrichment", { renameFiles: false });
-    addStatusMessage(`AI enrichment complete: ${formatMetadataSummary(enrichment)}`);
+    addStatusMessage(`AI enrichment complete: ${formatMetadataSummary(enrichment)}${adultProvidersSkippedNote(enrichment)}`);
   };
   const finishPipeline = async (result: ScanResult, reason: string) => {
     if (result.errors?.length) addStatusMessage(`Scan warnings: ${result.errors.slice(0, 3).join("; ")}`);

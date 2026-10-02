@@ -9,13 +9,22 @@
 //   --force  re-download every file
 //   --check  verify only; exit 1 if anything is missing (no network)
 // Env:    HF_ENDPOINT     alternate Hub host/mirror (default https://huggingface.co)
-//         HF_MODEL_REVISION  git revision to fetch (default main)
 //
-// Idempotent: files already present with the expected size are skipped.
+// Supply chain: files come from one pinned Hub commit (REVISION) and every
+// file is checked against a digest recorded here before it is accepted, so a
+// changed upstream repo or a tampered mirror fails the build instead of
+// shipping. LFS weights are checked by SHA-256 (the Hub's LFS oid); small JSON
+// files by their git blob SHA-1 at that commit. To move to a new revision,
+// update REVISION and MODEL_FILES together from
+// /api/models/<id>/tree/<commit>?recursive=1.
+//
+// Idempotent: files already present with the expected digest are skipped.
 // Resumable: downloads stream to <file>.part and resume with an HTTP Range
 // request when a partial file exists.
 
 import { createWriteStream } from "node:fs";
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { mkdir, rename, rm, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,19 +34,25 @@ import { pipeline } from "node:stream/promises";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const MODEL_ID = "Xenova/clip-vit-base-patch32";
 const ENDPOINT = (process.env.HF_ENDPOINT || "https://huggingface.co").replace(/\/+$/, "");
-const REVISION = process.env.HF_MODEL_REVISION || "main";
+// Xenova/clip-vit-base-patch32 at the 2025-07-08 commit.
+export const REVISION = "d15189d7028b43f1d3e65039190477f6af591c2a";
 const MODEL_DIR = join(ROOT, "public", "models", ...MODEL_ID.split("/"));
 
-// Expected sizes (bytes) as published on the Hub; used when the Hub API is
-// unreachable and to sanity-check what was downloaded.
-const MODEL_FILES = {
-  "config.json": 4524,
-  "preprocessor_config.json": 520,
-  "tokenizer.json": 2224119,
-  "tokenizer_config.json": 775,
-  "special_tokens_map.json": 472,
-  "onnx/text_model_quantized.onnx": 64504507,
-  "onnx/vision_model_quantized.onnx": 89117001,
+// size in bytes plus a digest: `sha256` (LFS oid) or `gitSha1` (git blob oid).
+export const MODEL_FILES = {
+  "config.json": { size: 4524, gitSha1: "e79bad158b04c235740f9b2ec320b17f4030f7a5" },
+  "preprocessor_config.json": { size: 520, gitSha1: "e0675735fd0052745f2f7b7291e4aa7859389998" },
+  "tokenizer.json": { size: 2224119, gitSha1: "bc1f77d20440541dd073ebae6f6c401087c7d34e" },
+  "tokenizer_config.json": { size: 775, gitSha1: "c9b2a711cbdd039529fa5a66f1965e13eb14451d" },
+  "special_tokens_map.json": { size: 472, gitSha1: "2c2130b544c0c5a72d5d00da071ba130a9800fb2" },
+  "onnx/text_model_quantized.onnx": {
+    size: 64504507,
+    sha256: "73baab855d406190da9faa498cfedf65f15cf309f4cc7385b7b032e6d08e5c3a",
+  },
+  "onnx/vision_model_quantized.onnx": {
+    size: 89117001,
+    sha256: "583fd1110a514667812fee7d684952aaf82a99b959760c8d7dca7e0ab9839299",
+  },
 };
 
 const args = new Set(process.argv.slice(2));
@@ -64,31 +79,29 @@ async function sizeOf(path) {
   }
 }
 
-async function fetchExpectedSizes() {
-  const url = `${ENDPOINT}/api/models/${MODEL_ID}/tree/${encodeURIComponent(REVISION)}?recursive=1`;
-  try {
-    const response = await fetch(url, { signal: AbortSignal.timeout(20_000) });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const tree = await response.json();
-    const sizes = { ...MODEL_FILES };
-    for (const entry of tree) {
-      if (entry?.type === "file" && entry.path in sizes) sizes[entry.path] = entry.lfs?.size ?? entry.size;
-    }
-    return sizes;
-  } catch (error) {
-    console.warn(`  ! Hub API unavailable (${error.message}); using built-in file sizes.`);
-    return { ...MODEL_FILES };
-  }
+/** Digest of a file in the form its manifest entry records it. */
+export async function digestOf(path, spec) {
+  const hash = createHash(spec.sha256 ? "sha256" : "sha1");
+  // A git blob id hashes a "blob <size>\0" header followed by the content.
+  if (!spec.sha256) hash.update(`blob ${spec.size}\0`);
+  await pipeline(createReadStream(path), hash);
+  return hash.digest("hex");
 }
 
-async function download(file, expected) {
+/** True when the file at `path` matches its manifest entry exactly. */
+export async function matchesManifest(path, spec) {
+  if ((await sizeOf(path)) !== spec.size) return false;
+  return (await digestOf(path, spec)) === (spec.sha256 ?? spec.gitSha1);
+}
+
+async function download(file, spec) {
+  const expected = spec.size;
   const target = join(MODEL_DIR, ...file.split("/"));
   const partial = `${target}.part`;
   await mkdir(dirname(target), { recursive: true });
 
-  const existing = await sizeOf(target);
-  if (!FORCE && existing === expected) {
-    console.log(`  = ${file} (${formatBytes(expected)}) already present`);
+  if (!FORCE && (await matchesManifest(target, spec))) {
+    console.log(`  = ${file} (${formatBytes(expected)}) already present and verified`);
     return expected;
   }
   if (FORCE) await rm(partial, { force: true });
@@ -109,8 +122,7 @@ async function download(file, expected) {
     throw new Error(`network error fetching ${url}: ${error.cause?.message ?? error.message}`);
   }
   if (response.status === 416 && offset === expected) {
-    await rename(partial, target);
-    return expected;
+    return accept(file, spec, partial, target, false);
   }
   if (!response.ok || !response.body) {
     throw new Error(`HTTP ${response.status} ${response.statusText} for ${url}`);
@@ -139,18 +151,28 @@ async function download(file, expected) {
       `${file}: size ${size} != expected ${expected}. Re-run to resume, or --force to restart.`,
     );
   }
+  return accept(file, spec, partial, target, resumed);
+}
+
+/** Moves a complete download into place only if its digest matches; otherwise discards it. */
+async function accept(file, spec, partial, target, resumed) {
+  if (!(await matchesManifest(partial, spec))) {
+    await rm(partial, { force: true });
+    throw new Error(`${file}: digest does not match the pinned revision ${REVISION}; download discarded.`);
+  }
   await rename(partial, target);
-  console.log(`  + ${file} (${formatBytes(size)})${resumed ? " [resumed]" : ""}`);
-  return size;
+  console.log(`  + ${file} (${formatBytes(spec.size)}) verified${resumed ? " [resumed]" : ""}`);
+  return spec.size;
 }
 
 async function check() {
   let ok = true;
-  for (const [file, expected] of Object.entries(MODEL_FILES)) {
-    const size = await sizeOf(join(MODEL_DIR, ...file.split("/")));
-    if (size !== expected) {
+  for (const [file, spec] of Object.entries(MODEL_FILES)) {
+    const path = join(MODEL_DIR, ...file.split("/"));
+    const size = await sizeOf(path);
+    if (size === null || !(await matchesManifest(path, spec))) {
       ok = false;
-      console.log(`  ✗ ${file}: ${size === null ? "missing" : `size ${size} != ${expected}`}`);
+      console.log(`  ✗ ${file}: ${size === null ? "missing" : "size or digest does not match the pinned revision"}`);
     }
   }
   console.log(ok ? "Local AI model files are present." : "Local AI model files are incomplete; run npm run fetch:ai-models.");
@@ -163,12 +185,11 @@ async function main() {
     process.exit((await check()) ? 0 : 1);
   }
 
-  const sizes = await fetchExpectedSizes();
   let modelBytes = 0;
   const failures = [];
-  for (const [file, expected] of Object.entries(sizes)) {
+  for (const [file, spec] of Object.entries(MODEL_FILES)) {
     try {
-      modelBytes += await download(file, expected);
+      modelBytes += await download(file, spec);
     } catch (error) {
       failures.push(`${file}: ${error.message}`);
       console.error(`  ✗ ${file}: ${error.message}`);
@@ -184,7 +205,10 @@ async function main() {
   console.log(`Done: ${formatBytes(modelBytes)} of model files ready to bundle.`);
 }
 
-main().catch((error) => {
-  console.error(`fetch-ai-models failed: ${error.stack ?? error}`);
-  process.exit(1);
-});
+// Run only as a CLI, so tests can import the manifest and digest helpers.
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error(`fetch-ai-models failed: ${error.stack ?? error}`);
+    process.exit(1);
+  });
+}

@@ -11,6 +11,7 @@ import {
   normalizePlusFeature,
   parsePaywallError,
   paywallAwareErrorMessage,
+  paywallShownByGate,
   planLabel,
   plusFeatureLabel,
   useEntitlementsStore,
@@ -144,4 +145,41 @@ test("the paywall panel offers the opt-in 30-day trial through start_trial", () 
   assert.match(panel, /Start free \$\{PLUS_TRIAL_DAYS\}-day trial/);
   assert.match(service, /invoke<unknown>\("start_trial"\)/);
   assert.match(service, /export const PLUS_TRIAL_DAYS = 30;/);
+});
+
+test("a paywall refusal is silent only when a gate is actually showing the lock", () => {
+  const free = normalizeEntitlements({ plan: "free", features: { remote_access: false } });
+  const plus = normalizeEntitlements({ plan: "plus", features: { remote_access: true } });
+  const refusal = "PAYWALL:remote_access:Remote access needs Plus";
+  assert.equal(paywallShownByGate(refusal, free), true);
+  // Unknown plan: gates fail open, so the refusal must be surfaced.
+  assert.equal(paywallShownByGate(refusal, null), false);
+  assert.equal(paywallShownByGate(refusal, plus), false);
+  assert.equal(paywallShownByGate("disk full", free), false);
+});
+
+test("a slow entitlement refresh never overwrites a newer activation", async () => {
+  const pending = [];
+  globalThis.window = {
+    __TAURI_INTERNALS__: {
+      invoke: (cmd) => new Promise((resolve) => pending.push({ cmd, resolve })),
+    },
+  };
+  try {
+    const store = useEntitlementsStore;
+    const refresh = store.getState().refresh();
+    const activate = store.getState().activate("CVL1.token.sig");
+    await new Promise((r) => setImmediate(r));
+    const byCmd = Object.fromEntries(pending.map((p) => [p.cmd, p.resolve]));
+    // Activation answers first, then the stale refresh (taken before activation).
+    byCmd.activate_license({ plan: "plus", features: { downloads: true } });
+    await activate;
+    byCmd.get_entitlements({ plan: "free", features: { downloads: false } });
+    await refresh;
+    assert.equal(store.getState().entitlements.plan, "plus");
+    assert.equal(store.getState().status, "ready");
+  } finally {
+    delete globalThis.window;
+    useEntitlementsStore.setState({ entitlements: null, status: "idle", error: null, paywallPrompt: null });
+  }
 });

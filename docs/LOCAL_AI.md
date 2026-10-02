@@ -11,10 +11,12 @@ CinaVault identifies films and checks posters with a free AI model that runs ins
 ## Where it is stored and how it is bundled
 
 1. `npm run fetch:ai-models` (`scripts/fetch-ai-models.mjs`) downloads the files into `public/models/Xenova/clip-vit-base-patch32/`.
-   - It is idempotent: files that already have the expected size are skipped.
+   - Files come from one pinned Hub commit, and each file is checked against a digest recorded in the script (SHA-256 for the ONNX weights, the git blob id for the JSON files). A file that doesn't match is discarded and the build fails. The runtime download fallback pins the same commit.
+   - It is idempotent: files that already match their digest are skipped.
    - It resumes interrupted downloads from `*.part` files using HTTP Range requests. `--force` re-downloads everything.
    - `npm run check:ai-models` only checks the files and exits 1 if any are missing.
-   - `HF_ENDPOINT` selects a Hub mirror. `HF_MODEL_REVISION` pins a revision.
+   - `HF_ENDPOINT` selects a Hub mirror; its files must still match the pinned digests.
+   - To move to a newer model revision, update `REVISION` and `MODEL_FILES` in the script and `VISION_MODEL_REVISION` in `src/services/localVision.ts` together.
 2. `vite build` copies `public/` into `dist/`, and Tauri packs `dist/` into the installer. At runtime the app loads the model from `/models/...` on its own origin.
 3. Vite emits the ONNX Runtime WASM binary (about 26 MB) from `node_modules/onnxruntime-web` as a hashed asset in `dist/assets/`. Its JS loader is inlined in the lazily loaded Transformers.js chunk (about 584 kB, 170 kB gzip). Neither one is fetched from a CDN in production builds.
 4. `public/models/` is in `.gitignore`. Model weights are never committed. Release CI must run `npm run fetch:ai-models` before `tauri build` to ship an installer that works offline.

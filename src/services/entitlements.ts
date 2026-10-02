@@ -236,37 +236,50 @@ interface EntitlementState {
   dismissPaywall: () => void;
 }
 
+// Bumped by every request that can change entitlements. A response is applied
+// only if no newer request started after it, so a slow refresh can never
+// overwrite the plan a later activate/trial/deactivate just set.
+let entitlementVersion = 0;
+
 export const useEntitlementsStore = create<EntitlementState>((set) => ({
   entitlements: null,
   status: "idle",
   error: null,
   paywallPrompt: null,
   refresh: async () => {
+    const version = ++entitlementVersion;
     set({ status: "loading" });
     try {
       const entitlements = await getEntitlements();
-      set({ entitlements, status: "ready", error: null });
+      if (version === entitlementVersion) set({ entitlements, status: "ready", error: null });
       return entitlements;
     } catch (error) {
       // Older back ends have no entitlement command: keep the UI unlocked and
       // let the back end remain the authority.
-      set({ entitlements: null, status: "unavailable", error: errorToText(error) });
+      if (version === entitlementVersion) {
+        set({ entitlements: null, status: "unavailable", error: errorToText(error) });
+      }
       return null;
     }
   },
   activate: async (token) => {
+    const version = ++entitlementVersion;
     const entitlements = await activateLicense(token);
-    set({ entitlements, status: "ready", error: null });
+    if (version === entitlementVersion) set({ entitlements, status: "ready", error: null });
     return entitlements;
   },
   deactivate: async () => {
+    const version = ++entitlementVersion;
     const entitlements = await deactivateLicense();
-    set({ entitlements, status: "ready", error: null });
+    if (version === entitlementVersion) set({ entitlements, status: "ready", error: null });
     return entitlements;
   },
   startTrial: async () => {
+    const version = ++entitlementVersion;
     const entitlements = await startTrial();
-    set({ entitlements, status: "ready", error: null, paywallPrompt: null });
+    if (version === entitlementVersion) {
+      set({ entitlements, status: "ready", error: null, paywallPrompt: null });
+    }
     return entitlements;
   },
   showPaywall: (feature, message) =>
@@ -303,6 +316,20 @@ export function handlePaywallError(error: unknown): boolean {
  * Human-readable error text for status lines. PAYWALL refusals open the
  * upgrade panel and become a short friendly sentence instead of raw text.
  */
+/**
+ * True when `error` is a Plus refusal that an on-screen FeatureGate is already
+ * showing (the plan is known and the feature is locked), so background loads
+ * can stay quiet. When entitlements are unknown the gates fail open, so the
+ * refusal must be surfaced instead.
+ */
+export function paywallShownByGate(
+  error: unknown,
+  entitlements: Entitlements | null = useEntitlementsStore.getState().entitlements,
+): boolean {
+  const paywall = parsePaywallError(error);
+  return paywall !== null && !isFeatureUnlocked(entitlements, paywall.feature);
+}
+
 export function paywallAwareErrorMessage(error: unknown): string {
   const paywall = parsePaywallError(error);
   if (paywall) {

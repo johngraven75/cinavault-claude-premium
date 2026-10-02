@@ -245,9 +245,10 @@ export default function HomeTab(): JSX.Element {
     try {
       // Unified library first (one card per work, duplicates folded into
       // copies); falls back to the paged get_media_items bridge.
+      // The count is informational: if it fails, still show the library.
       const [libraryLoad, exactCount] = await Promise.all([
         loadUnifiedLibrary(typeFilter, () => requestMediaPage(0)),
-        requestAuthoritativeCount(),
+        requestAuthoritativeCount().catch(() => null),
       ]);
       if (generation !== libraryLoadGenerationRef.current) return;
 
@@ -260,12 +261,13 @@ export default function HomeTab(): JSX.Element {
       setLibraryHasMore(hasMore);
       setAuthoritativeCount(exactCount);
       setAutoLoadingLibrary(!unified && shouldAutoLoadNextLibraryPage(items));
+      const countLabel = exactCount === null ? null : exactCount.toLocaleString();
       addStatusMessage(
         unified
-          ? `Unified vault: ${items.length.toLocaleString()} titles from ${exactCount.toLocaleString()} files across every library`
+          ? `Unified vault: ${items.length.toLocaleString()} titles${countLabel ? ` from ${countLabel} files` : ""} across every library`
           : hasMore
-            ? `HUD opened ${items.length} records; authoritative inventory is ${exactCount.toLocaleString()} and the full library is compiling`
-            : `HUD loaded all ${exactCount.toLocaleString()} vault records`,
+            ? `HUD opened ${items.length} records; authoritative inventory is ${countLabel ?? "unavailable"} and the full library is compiling`
+            : `HUD loaded all ${countLabel ?? items.length.toLocaleString()} vault records`,
       );
     } catch (error) {
       if (generation !== libraryLoadGenerationRef.current) return;

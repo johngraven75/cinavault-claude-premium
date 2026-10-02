@@ -181,6 +181,16 @@ export default function AccountTab(): JSX.Element {
                 Every Plus feature is unlocked on this computer.
               </p>
             </div>
+          ) : unavailable ? (
+            // No entitlement command (older back end): features stay unlocked
+            // and the back end decides, so don't present an upgrade offer.
+            <div className="glass-panel p-6 text-center" data-testid="cinavault-plan-unavailable">
+              <Sparkles size={30} className="mx-auto text-cyan-200" />
+              <h3 className="mt-3 text-lg font-black text-white">Plan status unavailable</h3>
+              <p className="mt-1 text-xs text-cv-subtext">
+                This server doesn't report a plan, so no features are locked here.
+              </p>
+            </div>
           ) : (
             <PaywallPanel />
           )}

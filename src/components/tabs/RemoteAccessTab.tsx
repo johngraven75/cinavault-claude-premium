@@ -40,6 +40,7 @@ import TabBanner from "../experience/TabBanner";
 import FeatureGate from "../paywall/FeatureGate";
 import {
   parsePaywallError,
+  paywallShownByGate,
   paywallAwareErrorMessage,
 } from "../../services/entitlements";
 
@@ -204,8 +205,8 @@ export default function RemoteAccessTab() {
       );
       setConnectivity(status);
     } catch (error) {
-      // Background poll: a Plus refusal is shown by the gate, not every 5 s.
-      if (parsePaywallError(error)) return;
+      // Background poll: a Plus refusal the gate already shows isn't repeated every 5 s.
+      if (paywallShownByGate(error)) return;
       addStatusMessage(`Remote connectivity status unavailable: ${error}`);
     }
   };
@@ -656,6 +657,8 @@ export default function RemoteAccessTab() {
       </div>
       </FeatureGate>
 
+      {/* Remote accounts only matter off-LAN, which is a Plus feature. */}
+      <FeatureGate feature="remote_access" title="Remote users and access checks" variant="compact">
       <div className="grid grid-cols-1 xl:grid-cols-[1.1fr_0.9fr] gap-5">
         <div className="glass-panel p-5">
           <h3 className="text-sm font-bold mb-4 flex items-center gap-2">
@@ -965,6 +968,7 @@ export default function RemoteAccessTab() {
           )}
         </div>
       </div>
+      </FeatureGate>
 
       <FeatureGate feature="remote_access" title="Remote streaming security & limits" variant="compact">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">

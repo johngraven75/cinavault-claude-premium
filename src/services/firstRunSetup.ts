@@ -194,3 +194,34 @@ export function maskKey(value: string): string {
   if (trimmed.length <= 4) return "••••";
   return `${trimmed.slice(0, 2)}${"•".repeat(Math.min(12, trimmed.length - 4))}${trimmed.slice(-2)}`;
 }
+
+/**
+ * Runs saves for the same provider one after another, in the order they were
+ * requested, so an older save can never land after a newer one and overwrite
+ * it. `latest` tells the caller whether its value is still the newest request,
+ * so stale results don't touch the UI.
+ */
+export function createSerialSaver(
+  save: (providerId: string, value: string) => Promise<boolean>,
+): (providerId: string, value: string) => Promise<{ saved: boolean; latest: boolean }> {
+  const tails = new Map<string, Promise<unknown>>();
+  const generations = new Map<string, number>();
+  return (providerId, value) => {
+    const generation = (generations.get(providerId) ?? 0) + 1;
+    generations.set(providerId, generation);
+    const previous = tails.get(providerId) ?? Promise.resolve();
+    const run = previous
+      .catch(() => undefined)
+      .then(() => save(providerId, value))
+      .then((saved) => ({ saved, latest: generations.get(providerId) === generation }));
+    tails.set(providerId, run);
+    return run;
+  };
+}
+
+/** Extra sentence for enrichment results when Plus-only adult providers were left out. */
+export function adultProvidersSkippedNote(result: { adult_providers_skipped?: string | null } | null | undefined): string {
+  return result?.adult_providers_skipped
+    ? " Adult metadata providers were skipped because they need CinaVault Plus."
+    : "";
+}

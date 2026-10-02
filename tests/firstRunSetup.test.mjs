@@ -75,7 +75,8 @@ test("the wizard component keeps adult provider names out of its own source", ()
   assert.doesNotMatch(wizard, /ThePornDB|StashDB/);
   assert.match(wizard, /IS_STORE_SAFE \? \[\] : ADULT_SETUP_PROVIDERS/);
   assert.match(wizard, /"run_library_enrichment", \{ renameFiles: false \}/);
-  assert.match(wizard, /"set_api_key", \{ provider: provider\.id, apiKey/);
+  assert.match(wizard, /"set_api_key", \{ provider: providerId, apiKey/);
+  assert.match(wizard, /createSerialSaver\(/);
   assert.match(wizard, /"test_api_key", \{/);
 });
 
@@ -97,4 +98,44 @@ test("key validation, test interpretation and masking", () => {
 
   assert.equal(maskKey("abc"), "••••");
   assert.equal(maskKey("abcdefgh"), "ab••••gh");
+});
+
+test("serial saver keeps the newest key when an older save finishes last", async () => {
+  const { createSerialSaver } = await import("../src/services/firstRunSetup.ts");
+  const stored = new Map();
+  const releases = [];
+  // Each save waits until the test releases it, in an order the test chooses.
+  const saver = createSerialSaver((id, value) =>
+    new Promise((resolve) => releases.push(() => { stored.set(id, value); resolve(true); })),
+  );
+  const first = saver("tmdb", "old-key");
+  const second = saver("tmdb", "new-key");
+  await new Promise((r) => setImmediate(r));
+  // Only the first save has started: the second waits for it.
+  assert.equal(releases.length, 1);
+  releases[0]();
+  assert.deepEqual(await first, { saved: true, latest: false });
+  await new Promise((r) => setImmediate(r));
+  releases[1]();
+  assert.deepEqual(await second, { saved: true, latest: true });
+  assert.equal(stored.get("tmdb"), "new-key");
+});
+
+test("serial saver keeps going after a failed save", async () => {
+  const { createSerialSaver } = await import("../src/services/firstRunSetup.ts");
+  let calls = 0;
+  const saver = createSerialSaver(async () => {
+    calls += 1;
+    if (calls === 1) throw new Error("keyring locked");
+    return true;
+  });
+  await assert.rejects(saver("tpdb", "a"), /keyring locked/);
+  assert.deepEqual(await saver("tpdb", "b"), { saved: true, latest: true });
+});
+
+test("enrichment results mention skipped adult providers only when skipped", async () => {
+  const { adultProvidersSkippedNote } = await import("../src/services/firstRunSetup.ts");
+  assert.equal(adultProvidersSkippedNote({ adult_providers_skipped: "PAYWALL:adult_metadata" }).includes("CinaVault Plus"), true);
+  assert.equal(adultProvidersSkippedNote({ adult_providers_skipped: null }), "");
+  assert.equal(adultProvidersSkippedNote(undefined), "");
 });

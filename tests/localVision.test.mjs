@@ -24,7 +24,7 @@ import {
   titleSimilarity,
   yearSimilarity,
 } from "../src/services/posterIdentification.ts";
-import { LruCache, VISION_MODEL_ID } from "../src/services/localVision.ts";
+import { LruCache, VISION_MODEL_ID, VISION_MODEL_REVISION } from "../src/services/localVision.ts";
 
 const close = (actual, expected, epsilon = 1e-6) =>
   assert.ok(Math.abs(actual - expected) < epsilon, `${actual} !~ ${expected}`);
@@ -259,7 +259,47 @@ test("model id and fetch script agree, and the vision service lazy-loads transfo
   assert.ok(script.includes(`"${VISION_MODEL_ID}"`));
   assert.ok(script.includes("onnx/vision_model_quantized.onnx"));
   assert.ok(script.includes("onnx/text_model_quantized.onnx"));
+  assert.ok(script.includes(`"${VISION_MODEL_REVISION}"`), "fetch script and runtime must pin the same revision");
+  assert.match(VISION_MODEL_REVISION, /^[0-9a-f]{40}$/, "revision must be an immutable commit id");
   const source = await readFile(new URL("../src/services/localVision.ts", import.meta.url), "utf8");
   assert.ok(!/^import .* from "@huggingface\/transformers"/m.test(source), "transformers must be imported lazily");
   assert.ok(source.includes('import("@huggingface/transformers")'));
+});
+
+test("model fetch accepts only files that match the pinned digests", async () => {
+  const { MODEL_FILES, digestOf, matchesManifest } = await import("../scripts/fetch-ai-models.mjs");
+  const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { execFileSync } = await import("node:child_process");
+
+  for (const [file, spec] of Object.entries(MODEL_FILES)) {
+    assert.ok(Number.isInteger(spec.size) && spec.size > 0, `${file} needs a size`);
+    if (file.endsWith(".onnx")) assert.match(spec.sha256 ?? "", /^[0-9a-f]{64}$/, `${file} needs a SHA-256`);
+    else assert.match(spec.gitSha1 ?? "", /^[0-9a-f]{40}$/, `${file} needs a git blob id`);
+  }
+
+  const dir = await mkdtemp(join(tmpdir(), "cv-model-"));
+  try {
+    const path = join(dir, "config.json");
+    const content = '{"model_type":"clip"}\n';
+    await writeFile(path, content);
+    const size = Buffer.byteLength(content);
+    // Same id git itself computes for the blob.
+    const gitSha1 = execFileSync("git", ["hash-object", path], { encoding: "utf8" }).trim();
+    assert.equal(await digestOf(path, { size, gitSha1 }), gitSha1);
+    assert.equal(await matchesManifest(path, { size, gitSha1 }), true);
+
+    const { createHash } = await import("node:crypto");
+    const sha256 = createHash("sha256").update(content).digest("hex");
+    assert.equal(await matchesManifest(path, { size, sha256 }), true);
+
+    // Same size, different bytes: rejected.
+    await writeFile(path, content.replace("clip", "evil"));
+    assert.equal(await matchesManifest(path, { size, gitSha1 }), false);
+    assert.equal(await matchesManifest(path, { size, sha256 }), false);
+    assert.equal(await matchesManifest(join(dir, "missing.json"), { size, sha256 }), false);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

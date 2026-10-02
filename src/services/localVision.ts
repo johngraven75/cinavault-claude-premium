@@ -19,6 +19,8 @@ import { cosineSimilarity, normalize, softmax } from "./visionMath.ts";
 
 export const VISION_MODEL_ID = "Xenova/clip-vit-base-patch32";
 export const VISION_MODEL_DTYPE = "q8" as const;
+/** Hub commit the bundled weights come from; the remote fallback pins it too (scripts/fetch-ai-models.mjs). */
+export const VISION_MODEL_REVISION = "d15189d7028b43f1d3e65039190477f6af591c2a";
 export const LOCAL_MODEL_PATH = "/models/";
 /** CLIP's learned logit scale (exp(4.6052) = 100). */
 export const CLIP_LOGIT_SCALE = 100;
@@ -189,10 +191,11 @@ async function configureEnvironment(lib: TransformersModule): Promise<"bundled" 
 }
 
 async function loadRuntime(device: VisionDevice, lib: TransformersModule): Promise<VisionRuntime> {
-  const options = { device, dtype: VISION_MODEL_DTYPE };
+  const revision = VISION_MODEL_REVISION;
+  const options = { device, dtype: VISION_MODEL_DTYPE, revision };
   const [tokenizer, processor, textModel, visionModel] = await Promise.all([
-    lib.AutoTokenizer.from_pretrained(VISION_MODEL_ID),
-    lib.AutoProcessor.from_pretrained(VISION_MODEL_ID),
+    lib.AutoTokenizer.from_pretrained(VISION_MODEL_ID, { revision }),
+    lib.AutoProcessor.from_pretrained(VISION_MODEL_ID, { revision }),
     lib.CLIPTextModelWithProjection.from_pretrained(VISION_MODEL_ID, options),
     lib.CLIPVisionModelWithProjection.from_pretrained(VISION_MODEL_ID, options),
   ]);
