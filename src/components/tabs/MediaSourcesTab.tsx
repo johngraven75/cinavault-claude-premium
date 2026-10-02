@@ -6,6 +6,7 @@ import { useAppStore, type LibraryEnrichmentResult } from "../../store/appStore"
 import { ExternalLink, File, FolderOpen, HardDrive, Link, Plus, RefreshCw, Scan, Sparkles, Trash2 } from "lucide-react";
 import TabBanner from "../experience/TabBanner";
 import { IS_STORE_SAFE } from "../../config/edition";
+import { paywallAwareErrorMessage } from "../../services/entitlements";
 
 type ScanResult = { status?: string; total_found?: number | string; total_added?: number | string; total_updated?: number | string; sources_scanned?: number | string; sources_failed?: number | string; errors?: string[] };
 type SourceLike = { id?: number; path: string; source_type: string; name: string; enabled: boolean; last_scanned?: string; item_count: number };
@@ -87,7 +88,7 @@ export default function MediaSourcesTab() {
       addStatusMessage(`Source scan complete: ${safeNumber(result.total_found)} found, ${safeNumber(result.total_added)} added, ${safeNumber(result.total_updated)} refreshed`);
       await finishPipeline(result, "single-source-scan");
       window.dispatchEvent(new Event("cinavault:source-added"));
-    } catch (error) { addStatusMessage(`Source pipeline failed: ${error}`); }
+    } catch (error) { addStatusMessage(`Source pipeline failed: ${paywallAwareErrorMessage(error)}`); }
     finally { setScanning(false); }
   };
   const addSource = async () => {
@@ -99,7 +100,7 @@ export default function MediaSourcesTab() {
       if (!health.readable) throw new Error(health.message);
       const sourceId = await invoke<number>("add_source", { path, sourceType: newSourceType, name });
       setNewSourcePath(""); setNewSourceName(""); addStatusMessage(`Source added: ${name}`); await loadSources(); await runSourcePipeline(sourceId, name);
-    } catch (error) { addStatusMessage(`Failed to add source: ${error}`); }
+    } catch (error) { addStatusMessage(`Failed to add source: ${paywallAwareErrorMessage(error)}`); }
     finally { setAddingSource(false); }
   };
   const removeSource = async (id: number) => {

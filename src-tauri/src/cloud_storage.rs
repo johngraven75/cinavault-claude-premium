@@ -139,6 +139,10 @@ pub fn cloud_auth_start(
     provider: String,
     auth_url: String,
 ) -> Result<Value, String> {
+    crate::entitlements::ensure_feature_state(
+        state.inner(),
+        crate::entitlements::Feature::ExternalLibraries,
+    )?;
     let root = resolve_provider_path(&provider, "")?;
     let provider = provider_key(&provider)?;
     let record = json!({
@@ -168,6 +172,10 @@ pub fn cloud_disconnect(state: State<AppState>, provider: String) -> Result<(), 
 
 #[tauri::command]
 pub fn cloud_sync(state: State<AppState>, provider: String, path: String) -> Result<Value, String> {
+    crate::entitlements::ensure_feature_state(
+        state.inner(),
+        crate::entitlements::Feature::ExternalLibraries,
+    )?;
     let root = resolve_provider_path(&provider, &path)?;
     let provider = provider_key(&provider)?;
     let count = count_media_files(&root);
@@ -217,14 +225,26 @@ pub fn cloud_sync(state: State<AppState>, provider: String, path: String) -> Res
 }
 
 #[tauri::command]
-pub fn cloud_browse(provider: String, path: String) -> Result<Vec<Value>, String> {
+pub fn cloud_browse(
+    state: State<AppState>,
+    provider: String,
+    path: String,
+) -> Result<Vec<Value>, String> {
+    crate::entitlements::ensure_feature_state(
+        state.inner(),
+        crate::entitlements::Feature::ExternalLibraries,
+    )?;
     let root = resolve_provider_path(&provider, &path)?;
     list_directory_entries(&root)
 }
 
 #[tauri::command]
-pub fn cloud_list_files(provider: String, path: String) -> Result<Vec<Value>, String> {
-    cloud_browse(provider, path)
+pub fn cloud_list_files(
+    state: State<AppState>,
+    provider: String,
+    path: String,
+) -> Result<Vec<Value>, String> {
+    cloud_browse(state, provider, path)
 }
 
 #[tauri::command]

@@ -29,6 +29,9 @@ import PluginsTab from "./components/tabs/PluginsTab";
 import AIDiagnosticsTab from "./components/tabs/AIDiagnosticsTab";
 import HFModelsTab from "./components/tabs/HFModelsTab";
 import SettingsTab from "./components/tabs/SettingsTab";
+import AccountTab from "./components/tabs/AccountTab";
+import FirstRunSetup from "./components/setup/FirstRunSetup";
+import PaywallHost from "./components/paywall/PaywallHost";
 import { pluginEngine } from "./data/pluginAdapter";
 import {
   getWheelDeltaPixels,
@@ -36,6 +39,7 @@ import {
 } from "./utils/pageWheelScroll";
 import { AI_MEDIA_AGENT_ENABLED } from "./services/aiMediaAgent";
 import { startAiMediaAutopilot } from "./services/aiMediaAutopilot";
+import { startPosterAutopilot } from "./services/aiPosterAutopilot";
 import { getPreferredMediaServer } from "./services/serverProvider";
 import { getEnabledCinaVaultFeatures } from "./features/cinavaultFeatureSuite";
 import {
@@ -58,6 +62,7 @@ const TAB_COMPONENTS: Record<TabId, FC> = {
   ai: AIDiagnosticsTab,
   "hf-models": HFModelsTab,
   settings: SettingsTab,
+  account: AccountTab,
 };
 
 const TAB_TITLES: Record<
@@ -160,6 +165,13 @@ const TAB_TITLES: Record<
     subtitle:
       "Shape appearance, behavior, automation policy, and persistent application preferences.",
     mode: "Config",
+  },
+  account: {
+    eyebrow: "Account & Plan",
+    title: "Your CinaVault",
+    subtitle:
+      "Plan status, CinaVault Plus license activation, and server administration.",
+    mode: "Account",
   },
 };
 
@@ -360,6 +372,21 @@ export default function App(): JSX.Element {
     });
   }, [addStatusMessage, setMediaItems, settings.ai_media_autopilot_interval_minutes]);
 
+  // Local AI vision: warm the bundled CLIP model once the UI is idle, then
+  // check unverified posters in the background. No user input, no token.
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void startPosterAutopilot().then((result) => {
+        if (result && (result.verified.length > 0 || result.flagged.length > 0)) {
+          addStatusMessage(
+            `AI vision checked ${result.checked} posters: ${result.verified.length} confirmed, ${result.flagged.length} look mismatched.`,
+          );
+        }
+      });
+    }, 8000);
+    return () => window.clearTimeout(timer);
+  }, [addStatusMessage]);
+
   useEffect(() => {
     applyTheme(currentTheme);
   }, [currentTheme]);
@@ -525,6 +552,9 @@ export default function App(): JSX.Element {
           </div>
         </main>
       </motion.div>
+
+      <PaywallHost />
+      <FirstRunSetup />
     </div>
   );
 }
