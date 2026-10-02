@@ -132,6 +132,38 @@ fn keyed_groups(
     Ok(map)
 }
 
+/// Candidate groups with more than one copy, for any scan mode. Blocking.
+fn raw_duplicate_groups(
+    mode: &str,
+    items: Vec<MediaItem>,
+) -> Result<Vec<(String, Vec<DuplicateFile>)>, String> {
+    if mode == "work" {
+        return Ok(group_items(items)
+            .into_iter()
+            .filter(|entry| entry.copy_count > 1)
+            .map(|entry| {
+                let files = entry
+                    .copies
+                    .iter()
+                    .map(|copy| DuplicateFile {
+                        id: copy.id,
+                        path: copy.file_path.clone(),
+                        name: entry.primary.title.clone(),
+                        size: copy.file_size.unwrap_or(0).max(0) as u64,
+                        hash: None,
+                    })
+                    .collect();
+                (entry.work_key, files)
+            })
+            .collect());
+    }
+    let files: Vec<DuplicateFile> = items.iter().map(to_duplicate_file).collect();
+    Ok(keyed_groups(mode, files)?
+        .into_iter()
+        .filter(|(_, files)| files.len() > 1)
+        .collect())
+}
+
 /// Group library copies that duplicate each other.
 ///
 /// Modes: `name_size` (default: same title and byte size), `size`, `name`,
@@ -162,35 +194,12 @@ pub async fn find_duplicates(
     };
     let scanned_files = items.len();
 
-    let raw_groups: Vec<(String, Vec<DuplicateFile>)> = if scan_mode == "work" {
-        group_items(items)
-            .into_iter()
-            .filter(|entry| entry.copy_count > 1)
-            .map(|entry| {
-                let files = entry
-                    .copies
-                    .iter()
-                    .map(|copy| DuplicateFile {
-                        id: copy.id,
-                        path: copy.file_path.clone(),
-                        name: entry.primary.title.clone(),
-                        size: copy.file_size.unwrap_or(0).max(0) as u64,
-                        hash: None,
-                    })
-                    .collect();
-                (entry.work_key, files)
-            })
-            .collect()
-    } else {
-        let files: Vec<DuplicateFile> = items.iter().map(to_duplicate_file).collect();
-        let mode = scan_mode.clone();
-        tokio::task::spawn_blocking(move || keyed_groups(&mode, files))
-            .await
-            .map_err(|e| format!("Duplicate scan failed: {e}"))??
-            .into_iter()
-            .filter(|(_, files)| files.len() > 1)
-            .collect()
-    };
+    // Grouping is CPU-bound (normalization and union-find for `work`, file
+    // fingerprinting for `content`): keep it off the async executor.
+    let mode = scan_mode.clone();
+    let raw_groups = tokio::task::spawn_blocking(move || raw_duplicate_groups(&mode, items))
+        .await
+        .map_err(|e| format!("Duplicate scan failed: {e}"))??;
 
     let mut groups: Vec<DuplicateGroup> = Vec::new();
     let mut total_wasted_bytes: u64 = 0;
@@ -259,7 +268,9 @@ fn remove_duplicate_in(db: &Database, item_id: i64) -> Result<bool, String> {
 }
 
 /// Rename, falling back to copy + delete when the quarantine folder is on a
-/// different volume than the media file.
+/// different volume than the media file. `dest` must be a path the caller
+/// owns (see [`reserve_quarantine_path`]): `rename` replaces an existing
+/// destination on every platform std supports.
 fn move_file(source: &Path, dest: &Path) -> Result<(), String> {
     if std::fs::rename(source, dest).is_ok() {
         return Ok(());
@@ -273,6 +284,42 @@ fn move_file(source: &Path, dest: &Path) -> Result<(), String> {
             source.display()
         )
     })
+}
+
+/// Atomically claim a quarantine path that no other file uses: `<name>`, then
+/// `<id>-<name>`, then `<id>-<n>-<name>`. The empty placeholder created here
+/// (`create_new`, so an existing file is never touched) is what the move then
+/// replaces, so an earlier quarantined copy can never be overwritten.
+fn reserve_quarantine_path(
+    quarantine_dir: &Path,
+    file_name: &std::ffi::OsStr,
+    item_id: i64,
+) -> Result<PathBuf, String> {
+    let name = file_name.to_string_lossy();
+    let candidates = std::iter::once(name.to_string())
+        .chain(std::iter::once(format!("{item_id}-{name}")))
+        .chain((2..10_000u32).map(|n| format!("{item_id}-{n}-{name}")));
+    for candidate in candidates {
+        let path = quarantine_dir.join(candidate);
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(_) => return Ok(path),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => {
+                return Err(format!(
+                    "Unable to create quarantine file {}: {e}",
+                    path.display()
+                ))
+            }
+        }
+    }
+    Err(format!(
+        "No free quarantine file name for {name} in {}",
+        quarantine_dir.display()
+    ))
 }
 
 fn remove_media_file(path: &std::path::Path) -> Result<(), String> {
@@ -312,19 +359,27 @@ fn quarantine_in(db: &Database, quarantine_dir: &Path, item_id: i64) -> Result<S
     let file_name = source
         .file_name()
         .ok_or_else(|| "Missing file name".to_string())?;
-    let mut dest = quarantine_dir.join(file_name);
-    if dest.exists() {
-        dest = quarantine_dir.join(format!("{item_id}-{}", file_name.to_string_lossy()));
+    let dest = reserve_quarantine_path(quarantine_dir, file_name, item_id)?;
+
+    if let Err(error) = move_file(&source, &dest) {
+        let _ = std::fs::remove_file(&dest);
+        return Err(error);
     }
 
-    move_file(&source, &dest)?;
-
-    db.conn
-        .execute(
-            "UPDATE media_items SET file_path = ?1 WHERE id = ?2",
-            params![dest.to_string_lossy().to_string(), item_id],
-        )
-        .map_err(|e| e.to_string())?;
+    if let Err(error) = db.conn.execute(
+        "UPDATE media_items SET file_path = ?1 WHERE id = ?2",
+        params![dest.to_string_lossy().to_string(), item_id],
+    ) {
+        // The library row still points at the original path: put the file
+        // back there so the row and the file agree again.
+        return Err(match move_file(&dest, &source) {
+            Ok(()) => format!("Quarantine cancelled; library update failed: {error}"),
+            Err(restore) => format!(
+                "Library update failed ({error}) and the file could not be restored; it is at {}: {restore}",
+                dest.display()
+            ),
+        });
+    }
 
     Ok(dest.to_string_lossy().to_string())
 }
@@ -406,6 +461,87 @@ mod tests {
         assert!(ids.contains(&0) && ids.contains(&1));
         assert!(groups[0].1[0].hash.is_some());
         std::fs::remove_dir_all(dir).ok();
+    }
+
+    fn add_item(db: &Database, path: &Path) -> i64 {
+        let mut item = test_item(0, "Movie", path.to_str().unwrap(), "movie");
+        item.id = None;
+        db.add_media_item_data(&item).unwrap()
+    }
+
+    #[test]
+    fn quarantine_never_overwrites_an_earlier_quarantined_copy() {
+        let dir = temp_dir();
+        let db = Database::new(dir.join("lib.db").to_str().unwrap()).unwrap();
+        let quarantine_dir = dir.join("quarantine");
+        std::fs::create_dir_all(&quarantine_dir).unwrap();
+        std::fs::create_dir_all(dir.join("lib")).unwrap();
+        let media = dir.join("lib").join("Movie.mkv");
+        std::fs::write(&media, b"new copy").unwrap();
+        let id = add_item(&db, &media);
+
+        // Both the plain name and the id-prefixed name are already taken.
+        let plain = quarantine_dir.join("Movie.mkv");
+        let prefixed = quarantine_dir.join(format!("{id}-Movie.mkv"));
+        std::fs::write(&plain, b"first").unwrap();
+        std::fs::write(&prefixed, b"second").unwrap();
+
+        let moved = PathBuf::from(quarantine_in(&db, &quarantine_dir, id).unwrap());
+        assert_ne!(moved, plain);
+        assert_ne!(moved, prefixed);
+        assert_eq!(std::fs::read(&plain).unwrap(), b"first");
+        assert_eq!(std::fs::read(&prefixed).unwrap(), b"second");
+        assert_eq!(std::fs::read(&moved).unwrap(), b"new copy");
+        assert!(!media.exists());
+        drop(db);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn quarantine_restores_the_file_when_the_library_update_fails() {
+        let dir = temp_dir();
+        let db = Database::new(dir.join("lib.db").to_str().unwrap()).unwrap();
+        let quarantine_dir = dir.join("quarantine");
+        let media = dir.join("Movie.mkv");
+        std::fs::write(&media, b"x").unwrap();
+        let id = add_item(&db, &media);
+        db.conn
+            .execute_batch(
+                "CREATE TRIGGER block_path_update BEFORE UPDATE OF file_path ON media_items \
+                 BEGIN SELECT RAISE(ABORT, 'simulated write failure'); END;",
+            )
+            .unwrap();
+
+        let error = quarantine_in(&db, &quarantine_dir, id).unwrap_err();
+        assert!(error.contains("simulated write failure"), "{error}");
+        assert_eq!(std::fs::read(&media).unwrap(), b"x");
+        assert_eq!(std::fs::read_dir(&quarantine_dir).unwrap().count(), 0);
+        let stored: String = db
+            .conn
+            .query_row(
+                "SELECT file_path FROM media_items WHERE id = ?1",
+                [id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(Path::new(&stored), media.as_path());
+        drop(db);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn work_mode_groups_copies_of_one_work() {
+        let mut a = test_item(1, "Heat", "/a/Heat.1995.2160p.mkv", "movie");
+        a.tmdb_id = Some("949".into());
+        a.file_size = Some(20);
+        let mut b = test_item(2, "Heat", "/b/Heat.1995.1080p.mkv", "movie");
+        b.tmdb_id = Some("949".into());
+        b.file_size = Some(10);
+        let other = test_item(3, "Ronin", "/c/Ronin.mkv", "movie");
+        let groups = raw_duplicate_groups("work", vec![a, b, other]).unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].0, "tmdb:949");
+        assert_eq!(groups[0].1.len(), 2);
     }
 
     #[test]

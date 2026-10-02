@@ -657,8 +657,8 @@ export default function RemoteAccessTab() {
       </div>
       </FeatureGate>
 
-      {/* Remote accounts only matter off-LAN, which is a Plus feature. */}
-      <FeatureGate feature="remote_access" title="Remote users and access checks" variant="compact">
+      {/* Accounts also sign in home-network clients, which stay free; the
+          embedded server refuses off-network requests (402) without Plus. */}
       <div className="grid grid-cols-1 xl:grid-cols-[1.1fr_0.9fr] gap-5">
         <div className="glass-panel p-5">
           <h3 className="text-sm font-bold mb-4 flex items-center gap-2">
@@ -968,7 +968,6 @@ export default function RemoteAccessTab() {
           )}
         </div>
       </div>
-      </FeatureGate>
 
       <FeatureGate feature="remote_access" title="Remote streaming security & limits" variant="compact">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">

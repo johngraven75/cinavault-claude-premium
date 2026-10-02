@@ -208,6 +208,9 @@ pub fn verify_license_token_with_key(
     }
     let issued_at = parse_time(&payload.issued_at, "issue time")?;
     let expires_at = parse_time(&payload.expires_at, "expiry time")?;
+    if expires_at <= issued_at {
+        return Err("License expiry is not after its issue time".into());
+    }
     if issued_at > now + Duration::days(1) {
         return Err("License was issued in the future; check this computer's clock".into());
     }
@@ -421,20 +424,37 @@ pub fn ensure_feature(db: &Database, feature: Feature) -> Result<(), String> {
     ensure_feature_with_key(db, feature, configured_public_key().as_ref(), Utc::now())
 }
 
-/// True for metadata providers that only serve adult content.
+/// True for metadata providers that only serve adult content, under every
+/// spelling the metadata back end accepts (`metadata_ext`/`metadata_guard`
+/// normalize "PGMA Modernized", "porn-site-nuxt", "IreneHub", "theporndb", ...
+/// to their canonical keys, so the paywall must recognize the same aliases).
 pub fn is_adult_provider(provider: &str) -> bool {
-    let provider = provider.trim().to_ascii_lowercase();
-    matches!(
-        provider.as_str(),
-        "tpdb"
-            | "theporndb"
-            | "porndb"
-            | "stashdb"
-            | "iafd"
-            | "porn_site_nuxt"
-            | "phoenixadult"
-            | "phoenix_adult"
-    ) || provider.contains("pgma")
+    if crate::adult_site_provider::is_porn_site_nuxt_alias(provider) {
+        return true;
+    }
+    let provider: String = provider
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .map(|c| if c == '-' || c == ' ' { '_' } else { c })
+        .collect();
+    crate::adult_site_provider::is_porn_site_nuxt_alias(&provider)
+        || matches!(
+            provider.as_str(),
+            "tpdb"
+                | "theporndb"
+                | "the_porn_db"
+                | "porndb"
+                | "porn_db"
+                | "stashdb"
+                | "stash_db"
+                | "iafd"
+                | "porn_site_nuxt"
+                | "phoenixadult"
+                | "phoenix_adult"
+        )
+        || provider.contains("pgma")
+        || provider.contains("porn")
 }
 
 /// Marker reported in results when adult providers were left out of a run.
@@ -669,6 +689,85 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.contains("expired"), "{error}");
+    }
+
+    #[test]
+    fn token_expiring_before_its_issue_time_fails() {
+        let key = signing_key(7);
+        let mut inverted = payload(PLAN_ID, "2026-06-01T00:00:00Z");
+        inverted["issued_at"] = serde_json::json!("2026-06-01T12:00:00Z");
+        let token = token_for(&key, &inverted);
+        // `now` lies before both timestamps and within the issue-time skew
+        // allowance, which used to let the inverted token through.
+        let error = verify_license_token_with_key(
+            &token,
+            &key.verifying_key(),
+            time("2026-05-31T23:00:00Z"),
+        )
+        .unwrap_err();
+        assert!(error.contains("not after its issue time"), "{error}");
+
+        let mut zero_length = payload(PLAN_ID, "2026-01-01T00:00:00Z");
+        zero_length["issued_at"] = serde_json::json!("2026-01-01T00:00:00Z");
+        let token = token_for(&key, &zero_length);
+        assert!(verify_license_token_with_key(
+            &token,
+            &key.verifying_key(),
+            time("2025-12-31T23:00:00Z"),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn every_adult_provider_alias_is_paywalled() {
+        for alias in [
+            "tpdb",
+            "TPDB",
+            "theporndb",
+            "ThePornDB",
+            "the-porn-db",
+            "porndb",
+            "stashdb",
+            "StashDB",
+            "stash-db",
+            "iafd",
+            "IAFD",
+            "phoenixadult",
+            "PhoenixAdult",
+            "phoenix-adult",
+            "phoenix adult",
+            "pgma",
+            "PGMA Modernized",
+            "pgma-modernized",
+            "pgma_modernized",
+            "plex pgma",
+            "porn_site_nuxt",
+            "porn-site-nuxt",
+            "porn site nuxt",
+            "Porn-Site-Nuxt",
+            "pornsite_nuxt",
+            "pornsite",
+            "pornhub-irene",
+            "pornhub_irene",
+            "IreneHub",
+            "irene_hub",
+            "irene-hub",
+            "nuxt_porn_site",
+            "nuxt-porn-site",
+            "  tpdb  ",
+        ] {
+            assert!(is_adult_provider(alias), "{alias} must be paywalled");
+        }
+        for general in [
+            "tmdb",
+            "omdb",
+            "tvdb",
+            "themoviedb",
+            "fanart",
+            "musicbrainz",
+        ] {
+            assert!(!is_adult_provider(general), "{general} is not adult");
+        }
     }
 
     #[test]

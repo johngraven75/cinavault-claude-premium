@@ -583,28 +583,62 @@ fn fill_metadata(primary: &mut MediaItem, others: &[&MediaItem]) {
     }
 }
 
-struct DisjointSet(Vec<usize>);
+/// Union-find over copies that also tracks, per set, the TMDb and IMDb id the
+/// set carries. A union that would put two different TMDb ids (or two
+/// different IMDb ids) into one set is refused, so a copy with mismatched ids
+/// (e.g. TMDb 1 + IMDb tt1 next to TMDb 2 + IMDb tt1) cannot glue unrelated
+/// works together transitively.
+struct DisjointSet {
+    parent: Vec<usize>,
+    tmdb: Vec<Option<String>>,
+    imdb: Vec<Option<String>>,
+}
 
 impl DisjointSet {
+    fn new(tmdb: Vec<Option<String>>, imdb: Vec<Option<String>>) -> Self {
+        DisjointSet {
+            parent: (0..tmdb.len()).collect(),
+            tmdb,
+            imdb,
+        }
+    }
+
     fn find(&mut self, index: usize) -> usize {
         let mut root = index;
-        while self.0[root] != root {
-            root = self.0[root];
+        while self.parent[root] != root {
+            root = self.parent[root];
         }
         let mut cursor = index;
-        while self.0[cursor] != root {
-            let next = self.0[cursor];
-            self.0[cursor] = root;
+        while self.parent[cursor] != root {
+            let next = self.parent[cursor];
+            self.parent[cursor] = root;
             cursor = next;
         }
         root
     }
 
-    fn union(&mut self, a: usize, b: usize) {
-        let (a, b) = (self.find(a), self.find(b));
-        if a != b {
-            self.0[a.max(b)] = a.min(b);
+    /// Merge the sets of `a` and `b` unless their ids conflict. Returns
+    /// whether the two copies now share a set.
+    fn union(&mut self, a: usize, b: usize) -> bool {
+        fn conflicts(left: &Option<String>, right: &Option<String>) -> bool {
+            matches!((left, right), (Some(left), Some(right)) if left != right)
         }
+        let (a, b) = (self.find(a), self.find(b));
+        if a == b {
+            return true;
+        }
+        if conflicts(&self.tmdb[a], &self.tmdb[b]) || conflicts(&self.imdb[a], &self.imdb[b]) {
+            return false;
+        }
+        let (root, child) = (a.min(b), a.max(b));
+        self.parent[child] = root;
+        if self.tmdb[root].is_none() {
+            self.tmdb[root] = self.tmdb[child].take();
+        }
+        if self.imdb[root].is_none() {
+            self.imdb[root] = self.imdb[child].take();
+        }
+        true
     }
 }
 
@@ -623,12 +657,12 @@ fn yearless_title_key(key: &str) -> Option<String> {
 /// one such work exists, otherwise they group by title key among themselves.
 pub fn group_items(items: Vec<MediaItem>) -> Vec<UnifiedEntry> {
     let count = items.len();
-    let mut sets = DisjointSet((0..count).collect());
     let strong: Vec<Option<String>> = items.iter().map(strong_key).collect();
     let titles: Vec<String> = items.iter().map(title_key).collect();
     let ids: Vec<(Option<String>, Option<String>)> = items.iter().map(id_keys).collect();
     let tmdb: Vec<Option<String>> = ids.iter().map(|(tmdb, _)| tmdb.clone()).collect();
     let imdb: Vec<Option<String>> = ids.iter().map(|(_, imdb)| imdb.clone()).collect();
+    let mut sets = DisjointSet::new(tmdb.clone(), imdb.clone());
 
     let mut first_by_key: HashMap<&str, usize> = HashMap::new();
     for index in 0..count {
@@ -637,7 +671,10 @@ pub fn group_items(items: Vec<MediaItem>) -> Vec<UnifiedEntry> {
             .flatten()
         {
             match first_by_key.get(key) {
-                Some(&first) => sets.union(first, index),
+                Some(&first) => {
+                    // Refused when the ids conflict: the copies stay apart.
+                    sets.union(first, index);
+                }
                 None => {
                     first_by_key.insert(key, index);
                 }
@@ -671,7 +708,9 @@ pub fn group_items(items: Vec<MediaItem>) -> Vec<UnifiedEntry> {
                 // Ambiguous between several identified works: keep apart.
             }
             None => match weak_first_by_title.get(title) {
-                Some(&first) => sets.union(first, index),
+                Some(&first) => {
+                    sets.union(first, index);
+                }
                 None => {
                     weak_first_by_title.insert(title, index);
                 }
@@ -1089,6 +1128,50 @@ mod tests {
         assert_eq!(entries[0].copy_count, 2);
         // ...but stays apart when the title is ambiguous between two works.
         assert_eq!(group_items(vec![a, b, d]).len(), 3);
+    }
+
+    #[test]
+    fn conflicting_provider_ids_never_merge_transitively() {
+        // Same IMDb id but different TMDb ids: the ids disagree, keep apart.
+        let mut a = item(1, "Alpha", "/a/Alpha.mkv", "movie");
+        a.tmdb_id = Some("1".into());
+        a.imdb_id = Some("tt1".into());
+        let mut b = item(2, "Beta", "/b/Beta.mkv", "movie");
+        b.tmdb_id = Some("2".into());
+        b.imdb_id = Some("tt1".into());
+        let entries = group_items(vec![a, b]);
+        assert_eq!(entries.len(), 2);
+        assert!(entries.iter().all(|entry| entry.copy_count == 1));
+
+        // A bridge copy with consistent ids still joins TMDb-only and
+        // IMDb-only copies of the same work into one card.
+        let mut tmdb_only = item(3, "Gamma", "/c/Gamma.mkv", "movie");
+        tmdb_only.tmdb_id = Some("1".into());
+        let mut bridge = item(4, "Gamma Remux", "/d/Gamma.Remux.mkv", "movie");
+        bridge.tmdb_id = Some("1".into());
+        bridge.imdb_id = Some("tt9".into());
+        let mut imdb_only = item(5, "Gamma Alt", "/e/Gamma.Alt.mkv", "movie");
+        imdb_only.imdb_id = Some("tt9".into());
+        let entries = group_items(vec![tmdb_only, bridge, imdb_only]);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].copy_count, 3);
+
+        // A bridge must not glue two different TMDb works together.
+        let mut x = item(6, "Xray", "/f/Xray.mkv", "movie");
+        x.tmdb_id = Some("10".into());
+        x.imdb_id = Some("tt10".into());
+        let mut y = item(7, "Yankee", "/g/Yankee.mkv", "movie");
+        y.tmdb_id = Some("20".into());
+        let mut glue = item(8, "Zulu", "/h/Zulu.mkv", "movie");
+        glue.tmdb_id = Some("20".into());
+        glue.imdb_id = Some("tt10".into());
+        let entries = group_items(vec![x, y, glue]);
+        assert_eq!(entries.len(), 2);
+        let tmdb_10 = entries
+            .iter()
+            .find(|entry| entry.work_key == "tmdb:10")
+            .unwrap();
+        assert_eq!(tmdb_10.copy_count, 1);
     }
 
     #[test]
