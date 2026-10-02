@@ -42,6 +42,9 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { IS_STORE_SAFE } from "../../config/edition";
+import { loadUnifiedLibrary } from "../../services/unifiedLibrary";
+import { CopiesList, CopyCountBadge } from "../library/UnifiedCopies";
+import type { MediaCopyInfo } from "../../store/appStore";
 
 type Shelf = "recent" | "verified" | "unverified" | "favorites";
 
@@ -182,6 +185,7 @@ export default function HomeTab(): JSX.Element {
     useState<TitleInitialFilter>("all");
   const [metadataCheckId, setMetadataCheckId] = useState<number | null>(null);
   const [libraryLoadError, setLibraryLoadError] = useState<string | null>(null);
+  const [unifiedView, setUnifiedView] = useState(false);
   const libraryLoadGenerationRef = useRef(0);
 
   const requestMediaPage = useCallback(
@@ -239,22 +243,31 @@ export default function HomeTab(): JSX.Element {
     setLibraryLoadError(null);
 
     try {
-      const [items, exactCount] = await Promise.all([
-        requestMediaPage(0),
-        requestAuthoritativeCount(),
+      // Unified library first (one card per work, duplicates folded into
+      // copies); falls back to the paged get_media_items bridge.
+      // The count is informational: if it fails, still show the library.
+      const [libraryLoad, exactCount] = await Promise.all([
+        loadUnifiedLibrary(typeFilter, () => requestMediaPage(0)),
+        requestAuthoritativeCount().catch(() => null),
       ]);
       if (generation !== libraryLoadGenerationRef.current) return;
 
-      const hasMore = hasMoreLibraryPages(items);
+      const items = libraryLoad.items;
+      const unified = libraryLoad.unified;
+      const hasMore = !unified && hasMoreLibraryPages(items);
+      setUnifiedView(unified);
       setMediaItems(items);
       setLibraryOffset(items.length);
       setLibraryHasMore(hasMore);
       setAuthoritativeCount(exactCount);
-      setAutoLoadingLibrary(shouldAutoLoadNextLibraryPage(items));
+      setAutoLoadingLibrary(!unified && shouldAutoLoadNextLibraryPage(items));
+      const countLabel = exactCount === null ? null : exactCount.toLocaleString();
       addStatusMessage(
-        hasMore
-          ? `HUD opened ${items.length} records; authoritative inventory is ${exactCount.toLocaleString()} and the full library is compiling`
-          : `HUD loaded all ${exactCount.toLocaleString()} vault records`,
+        unified
+          ? `Unified vault: ${items.length.toLocaleString()} titles${countLabel ? ` from ${countLabel} files` : ""} across every library`
+          : hasMore
+            ? `HUD opened ${items.length} records; authoritative inventory is ${countLabel ?? "unavailable"} and the full library is compiling`
+            : `HUD loaded all ${countLabel ?? items.length.toLocaleString()} vault records`,
       );
     } catch (error) {
       if (generation !== libraryLoadGenerationRef.current) return;
@@ -276,6 +289,7 @@ export default function HomeTab(): JSX.Element {
     requestMediaPage,
     setMediaItems,
     setSelectedMedia,
+    typeFilter,
   ]);
 
   const loadMoreMedia = useCallback(
@@ -391,6 +405,9 @@ export default function HomeTab(): JSX.Element {
     }
   };
 
+  const handlePlayCopy = (item: MediaItem, copy: MediaCopyInfo) =>
+    void handlePlay({ ...item, file_path: copy.file_path, resolution: copy.resolution ?? item.resolution });
+
   const handleVerify = async (item: MediaItem) => {
     if (!item.id) return;
     try {
@@ -476,7 +493,7 @@ export default function HomeTab(): JSX.Element {
             <div className="cyber-eyebrow mb-3 flex items-center gap-2"><Activity size={13} /> User Terminal Quick-Stats</div>
             <TerminalLine label="Watchtime" value={`${watchtimeHours}h`} />
             <TerminalLine label="Vault Inventory" value={inventoryLabel} />
-            <TerminalLine label="Loaded Records" value={displayableMediaItems.length.toLocaleString()} />
+            <TerminalLine label={unifiedView ? "Unified Titles" : "Loaded Records"} value={displayableMediaItems.length.toLocaleString()} />
             <TerminalLine label="Visible Records" value={filteredItems.length.toLocaleString()} />
             <TerminalLine label="Verified Signal" value={`${verifiedCount} locked`} />
             <TerminalLine label="Count Policy" value={authoritativeCount === null ? "Unavailable" : "Uncapped DB total"} />
@@ -550,7 +567,7 @@ export default function HomeTab(): JSX.Element {
                 const checking = metadataCheckId === item.id;
                 return (
                   <div key={`${item.id || item.title}-row-${index}`} role="button" tabIndex={0} onClick={() => setSelectedMedia(item)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedMedia(item); } }} className="cyber-table-row with-metadata-action w-full text-left text-sm">
-                    <span className="truncate font-semibold">{item.title}</span>
+                    <span className="flex min-w-0 items-center gap-2"><span className="truncate font-semibold">{item.title}</span><CopyCountBadge item={item} className="shrink-0" /></span>
                     <span className="text-xs capitalize text-cv-subtext">{item.media_type}</span>
                     <span className="text-xs text-cv-subtext">{item.year || "—"}</span>
                     <span className="flex items-center gap-1 text-xs">{item.rating ? <><Star size={11} className="text-[var(--cyber-amber)]" />{item.rating}</> : "—"}</span>
@@ -581,6 +598,7 @@ export default function HomeTab(): JSX.Element {
               <TerminalLine label="Favorite" value={selectedMedia.favorite ? "Vaulted" : "Not Set"} />
             </div>
             {selectedMedia.overview && <p className="mt-4 rounded border border-cyan-300/10 bg-black/30 p-3 text-xs leading-6 text-cv-subtext">{selectedMedia.overview}</p>}
+            <CopiesList item={selectedMedia} onPlayCopy={(copy) => handlePlayCopy(selectedMedia, copy)} />
             {!IS_STORE_SAFE && selectedMedia.media_type === "adult" && <AdultChapterArtwork filePath={selectedMedia.file_path} />}
             <div className="mt-4 grid gap-2">
               <button type="button" onClick={() => void handlePlay(selectedMedia)} className="cyber-button"><Play size={14} /> Quick Play</button>
@@ -658,6 +676,7 @@ function CardVisual({ item }: { item: MediaItem }): JSX.Element {
     <div className="cyber-poster aspect-[2/3]">
       <MediaPosterImage path={item.poster_path || item.backdrop_path} alt={item.title} fallbackClassName="flex h-full w-full items-center justify-center" />
       <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
+      <CopyCountBadge item={item} className="absolute left-2 top-2 z-[2]" />
       <div className="absolute right-2 top-2 flex flex-col gap-1">
         {item.verified && <span className="grid h-6 w-6 place-items-center border border-cyan-200/40 bg-cyan-300/20 text-cyan-100"><CheckCircle size={12} /></span>}
         {item.favorite && <span className="grid h-6 w-6 place-items-center border border-[var(--cyber-amber)]/50 bg-[var(--cyber-amber)]/20 text-[var(--cyber-amber)]"><Heart size={12} /></span>}

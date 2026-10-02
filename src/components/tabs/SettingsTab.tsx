@@ -24,8 +24,10 @@ import {
   Download,
   RefreshCw,
   HardDrive,
+  Wand2,
 } from "lucide-react";
 import TabBanner from "../experience/TabBanner";
+import { openFirstRunSetup } from "../setup/FirstRunSetup";
 
 export default function SettingsTab() {
   const {
@@ -136,6 +138,14 @@ export default function SettingsTab() {
 
         {/* Save / Reset */}
         <div className="pt-3 space-y-2">
+          <button
+            type="button"
+            onClick={openFirstRunSetup}
+            className="w-full cv-btn cv-btn-secondary text-xs py-2.5 flex items-center justify-center gap-1.5"
+            title="Reopen the first-run setup wizard (metadata keys, AI vision)"
+          >
+            <Wand2 size={12} /> Run Setup Wizard
+          </button>
           <button
             onClick={handleSave}
             disabled={saving}
