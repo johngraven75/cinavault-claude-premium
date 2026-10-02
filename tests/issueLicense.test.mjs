@@ -36,7 +36,10 @@ test("generates a keypair outside the repo and issues a verifiable token", () =>
     assert.equal(generated.status, 0, generated.stderr);
     const publicKey = generated.stdout.trim();
     assert.equal(Buffer.from(publicKey, "base64").length, 32);
-    assert.equal(statSync(keyPath).mode & 0o077, 0, "private key must not be group/world readable");
+    // POSIX permission bits only; Windows reports 0o666 and protects the file with user-profile ACLs.
+    if (process.platform !== "win32") {
+      assert.equal(statSync(keyPath).mode & 0o077, 0, "private key must not be group/world readable");
+    }
     const privateKey = createPrivateKey(readFileSync(keyPath, "utf8"));
     assert.equal(publicKeyBase64(createPublicKey(privateKey)), publicKey);
 
