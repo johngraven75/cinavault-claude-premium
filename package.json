@@ -26,8 +26,8 @@
     "scan:preventive": "node scripts/scan-preventive-risks.mjs",
     "verify:preflight": "npm run verify:master-build && npm run verify:contracts && npm run scan:preventive",
     "generate:evidence": "node scripts/generate-master-ci-evidence.mjs",
-    "test": "npm run verify:preflight && node --test tests/carryForwardVerification.test.mjs tests/build170RemoteConnectivity.test.mjs tests/v2Build102UiStability.test.mjs tests/v2Build103CommandPaletteStability.test.mjs tests/platformParityContract.test.mjs tests/hlsStreamSupport.test.mjs tests/build140GoogleCast.test.mjs tests/storeSafeEdition.test.mjs && npm run test:remote-user && npm run test:local-vision && npm run test:library-engine",
-    "test:all": "npm run verify:preflight && node --test tests/carryForwardVerification.test.mjs tests/build170RemoteConnectivity.test.mjs tests/v2Build102UiStability.test.mjs tests/v2Build103CommandPaletteStability.test.mjs tests/platformParityContract.test.mjs tests/hlsStreamSupport.test.mjs tests/build140GoogleCast.test.mjs tests/storeSafeEdition.test.mjs && npm run test:remote-user && npm run test:local-vision && npm run test:library-engine",
+    "test": "npm run verify:preflight && node --test tests/carryForwardVerification.test.mjs tests/build170RemoteConnectivity.test.mjs tests/v2Build102UiStability.test.mjs tests/v2Build103CommandPaletteStability.test.mjs tests/platformParityContract.test.mjs tests/hlsStreamSupport.test.mjs tests/build140GoogleCast.test.mjs tests/storeSafeEdition.test.mjs && npm run test:remote-user && npm run test:local-vision && npm run test:library-engine && npm run test:holo-ui",
+    "test:all": "npm run verify:preflight && node --test tests/carryForwardVerification.test.mjs tests/build170RemoteConnectivity.test.mjs tests/v2Build102UiStability.test.mjs tests/v2Build103CommandPaletteStability.test.mjs tests/platformParityContract.test.mjs tests/hlsStreamSupport.test.mjs tests/build140GoogleCast.test.mjs tests/storeSafeEdition.test.mjs && npm run test:remote-user && npm run test:local-vision && npm run test:library-engine && npm run test:holo-ui",
     "test:carry-forward": "node --test tests/carryForwardVerification.test.mjs",
     "test:governance": "npm run verify:preflight && node --test tests/carryForwardVerification.test.mjs",
     "test:build169": "node --test tests/carryForwardVerification.test.mjs",
@@ -41,6 +41,7 @@
     "fetch:ai-models": "node scripts/fetch-ai-models.mjs",
     "check:ai-models": "node scripts/fetch-ai-models.mjs --check",
     "test:local-vision": "node --loader ./tests/typescript-loader.mjs --test tests/localVision.test.mjs tests/aiPosterAutopilot.test.mjs",
+    "test:holo-ui": "node --loader ./tests/typescript-loader.mjs --test tests/holoUi.test.mjs",
     "test:library-engine": "node --loader ./tests/typescript-loader.mjs --test tests/entitlementsUi.test.mjs tests/firstRunSetup.test.mjs tests/unifiedLibrary.test.mjs && node --test tests/issueLicense.test.mjs"
   },
   "dependencies": {
