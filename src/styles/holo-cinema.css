@@ -753,6 +753,42 @@
   }
 }
 
+/* ── Vault assistant orb ─────────────────────────────────────────────── */
+
+.cv-agent-orb {
+  transition: transform 200ms ease, opacity 200ms ease;
+}
+
+.cv-agent-orb:hover {
+  transform: scale(1.06);
+}
+
+.cv-agent-orb__ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  border: 2px solid rgba(103, 232, 249, 0.75);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.cv-agent-orb--busy .cv-agent-orb__ring {
+  animation: holoPulse 1.1s ease-out infinite;
+}
+
+.cv-agent-orb--speaking .cv-agent-orb__ring {
+  animation: holoPulse 1.8s ease-out infinite;
+}
+
+.cv-agent-orb--setup .cv-agent-orb__ring {
+  border-color: rgba(252, 211, 77, 0.8);
+  animation: holoPulse 2.6s ease-out infinite;
+}
+
+.cv-agent-dot--busy {
+  animation: holoBreath 0.9s ease-in-out infinite;
+}
+
 /* ── Reduced motion ──────────────────────────────────────────────────── */
 
 @media (prefers-reduced-motion: reduce) {
@@ -790,8 +826,16 @@
   .holo-orbital__core,
   .holo-beacon__pulse,
   .holo-progress__glint,
-  .holo-route-veil {
+  .holo-route-veil,
+  .cv-agent-orb__ring,
+  .cv-agent-dot--busy {
     animation: none !important;
+  }
+
+  .cv-agent-orb,
+  .cv-agent-orb:hover {
+    transition: none;
+    transform: none;
   }
 
   .holo-progress.is-indeterminate .holo-progress__fill {

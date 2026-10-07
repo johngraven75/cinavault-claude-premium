@@ -32,6 +32,7 @@ import SettingsTab from "./components/tabs/SettingsTab";
 import AccountTab from "./components/tabs/AccountTab";
 import FirstRunSetup from "./components/setup/FirstRunSetup";
 import PaywallHost from "./components/paywall/PaywallHost";
+import AgentDock from "./components/agent/AgentDock";
 import { StatusBeacon } from "./components/holo/CinematicLoaders";
 import { pluginEngine } from "./data/pluginAdapter";
 import {
@@ -560,6 +561,7 @@ export default function App(): JSX.Element {
 
       <PaywallHost />
       <FirstRunSetup />
+      <AgentDock />
     </div>
     </MotionConfig>
   );
