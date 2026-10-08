@@ -19,7 +19,7 @@ import {
   MAX_SPEECH_SECONDS,
 } from "../src/services/aiAgentState.ts";
 
-const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
+const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8").replace(/\r\n/g, "\n");
 
 test("typing makes an idle head listen, and stopping returns it to idle", () => {
   assert.equal(nextHeadMode("idle", { type: "typing" }), "listening");
