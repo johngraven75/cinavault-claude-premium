@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   HEAD_RIG,
@@ -173,7 +174,7 @@ function walk(dir) {
 }
 
 test("the Anthropic key and endpoint never appear in front-end code", () => {
-  const srcDir = new URL("../src", import.meta.url).pathname;
+  const srcDir = fileURLToPath(new URL("../src", import.meta.url));
   for (const file of walk(srcDir).filter((f) => /\.(ts|tsx|js|jsx|json)$/.test(f))) {
     const source = readFileSync(file, "utf8");
     assert.doesNotMatch(source, /ANTHROPIC_API_KEY\s*[:=]|process\.env\.ANTHROPIC|import\.meta\.env\.\w*ANTHROPIC/, file);
