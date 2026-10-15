@@ -12,7 +12,7 @@ import {
   staggerDelay,
 } from "../src/utils/holoMotion.ts";
 
-const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
+const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8").replace(/\r\n/g, "\n");
 const rect = { left: 100, top: 200, width: 200, height: 300 };
 
 test("pointer at the card centre leaves the card at rest", () => {

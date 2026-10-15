@@ -26,8 +26,8 @@
     "scan:preventive": "node scripts/scan-preventive-risks.mjs",
     "verify:preflight": "npm run verify:master-build && npm run verify:contracts && npm run scan:preventive",
     "generate:evidence": "node scripts/generate-master-ci-evidence.mjs",
-    "test": "npm run verify:preflight && node --test tests/carryForwardVerification.test.mjs tests/build170RemoteConnectivity.test.mjs tests/v2Build102UiStability.test.mjs tests/v2Build103CommandPaletteStability.test.mjs tests/platformParityContract.test.mjs tests/hlsStreamSupport.test.mjs tests/build140GoogleCast.test.mjs tests/storeSafeEdition.test.mjs && npm run test:remote-user && npm run test:local-vision && npm run test:library-engine && npm run test:holo-ui",
-    "test:all": "npm run verify:preflight && node --test tests/carryForwardVerification.test.mjs tests/build170RemoteConnectivity.test.mjs tests/v2Build102UiStability.test.mjs tests/v2Build103CommandPaletteStability.test.mjs tests/platformParityContract.test.mjs tests/hlsStreamSupport.test.mjs tests/build140GoogleCast.test.mjs tests/storeSafeEdition.test.mjs && npm run test:remote-user && npm run test:local-vision && npm run test:library-engine && npm run test:holo-ui",
+    "test": "npm run verify:preflight && node --test tests/carryForwardVerification.test.mjs tests/build170RemoteConnectivity.test.mjs tests/v2Build102UiStability.test.mjs tests/v2Build103CommandPaletteStability.test.mjs tests/platformParityContract.test.mjs tests/hlsStreamSupport.test.mjs tests/build140GoogleCast.test.mjs tests/storeSafeEdition.test.mjs && npm run test:remote-user && npm run test:local-vision && npm run test:library-engine && npm run test:holo-ui && npm run test:ai-agent",
+    "test:all": "npm run verify:preflight && node --test tests/carryForwardVerification.test.mjs tests/build170RemoteConnectivity.test.mjs tests/v2Build102UiStability.test.mjs tests/v2Build103CommandPaletteStability.test.mjs tests/platformParityContract.test.mjs tests/hlsStreamSupport.test.mjs tests/build140GoogleCast.test.mjs tests/storeSafeEdition.test.mjs && npm run test:remote-user && npm run test:local-vision && npm run test:library-engine && npm run test:holo-ui && npm run test:ai-agent",
     "test:carry-forward": "node --test tests/carryForwardVerification.test.mjs",
     "test:governance": "npm run verify:preflight && node --test tests/carryForwardVerification.test.mjs",
     "test:build169": "node --test tests/carryForwardVerification.test.mjs",
@@ -42,10 +42,12 @@
     "check:ai-models": "node scripts/fetch-ai-models.mjs --check",
     "test:local-vision": "node --loader ./tests/typescript-loader.mjs --test tests/localVision.test.mjs tests/aiPosterAutopilot.test.mjs",
     "test:holo-ui": "node --loader ./tests/typescript-loader.mjs --test tests/holoUi.test.mjs",
+    "test:ai-agent": "node --loader ./tests/typescript-loader.mjs --test tests/aiAgent.test.mjs",
     "test:library-engine": "node --loader ./tests/typescript-loader.mjs --test tests/entitlementsUi.test.mjs tests/firstRunSetup.test.mjs tests/unifiedLibrary.test.mjs && node --test tests/issueLicense.test.mjs"
   },
   "dependencies": {
     "@huggingface/transformers": "4.3.0",
+    "@react-three/fiber": "9.8.1",
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-clipboard-manager": "^2.3.2",
     "@tauri-apps/plugin-dialog": "^2.7.1",
@@ -61,6 +63,7 @@
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-virtuoso": "4.7.0",
+    "three": "0.186.1",
     "zustand": "4.5.0"
   },
   "devDependencies": {
@@ -70,6 +73,7 @@
     "@types/node": "^26.1.0",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.7",
+    "@types/three": "0.186.0",
     "@vitejs/plugin-react": "4.7.0",
     "autoprefixer": "10.4.19",
     "postcss": "8.5.26",

@@ -3,6 +3,7 @@
 
 mod adult_site_provider;
 mod ai;
+mod ai_agent;
 mod ai_automation;
 mod atomic_file;
 mod build_identity;
@@ -316,6 +317,13 @@ pub fn run() {
             ai::ensure_hf_token,
             ai::get_ai_config,
             ai::set_ai_model,
+            ai_agent::agent_status,
+            ai_agent::agent_set_api_key,
+            ai_agent::agent_clear_api_key,
+            ai_agent::agent_set_model,
+            ai_agent::agent_reset,
+            ai_agent::agent_chat,
+            ai_agent::agent_run_action,
             ai_automation::ai_library_manage,
             metadata_enrichment_runtime::run_library_enrichment,
             enrichment::gather_adult_metadata,
